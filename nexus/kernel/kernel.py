@@ -12,7 +12,12 @@ from nexus.kernel.registry import AgentRegistry
 from nexus.kernel.resource import ResourceManager
 from nexus.kernel.scheduler import Task, TaskScheduler, TaskStatus
 from nexus.mcp_layer.registry import ToolRegistry
+from nexus.agents.messaging import MessageRouter
+from nexus.events.approval import ApprovalGate
+from nexus.memory.long_term import LongTermMemory
 from nexus.memory.shared import SharedMemory
+from nexus.mcp_layer.creator import DynamicToolCreator
+from nexus.mcp_layer.sandbox import Sandbox
 
 if TYPE_CHECKING:
     from nexus.agents.base import BaseAgent
@@ -31,6 +36,10 @@ class Kernel:
         self.resource_mgr = ResourceManager()
         self.tool_registry = ToolRegistry()
         self.shared_memory = SharedMemory(self.event_bus)
+        self.message_router = MessageRouter(self.event_bus)
+        self.long_term_memory: LongTermMemory | None = None
+        self.approval_gate: ApprovalGate | None = None
+        self.tool_creator: DynamicToolCreator | None = None
         self._booted = False
 
     # ── Lifecycle ────────────────────────────────────────────────────
@@ -47,6 +56,32 @@ class Kernel:
 
         # Ensure workspace exists
         self.config.workspace_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize long-term memory (ChromaDB)
+        persist_dir = str(self.config.workspace_dir / "chromadb")
+        self.long_term_memory = LongTermMemory(persist_dir=persist_dir)
+
+        # Initialize approval gate
+        auto_approve = not self.config.require_approval_for_tools
+        self.approval_gate = ApprovalGate(self.event_bus, auto_approve=auto_approve)
+
+        # Initialize tool creator (self-evolution engine)
+        sandbox = Sandbox(
+            workspace=self.config.workspace_dir / "sandbox",
+            timeout=self.config.tool_creation_timeout,
+        )
+        self.tool_creator = DynamicToolCreator(
+            event_bus=self.event_bus,
+            tool_registry=self.tool_registry,
+            sandbox=sandbox,
+            approval_gate=self.approval_gate,
+            tools_dir=self.config.tools_dir,
+        )
+
+        # Load persisted tools from previous sessions
+        loaded = await self.tool_creator.load_persisted_tools()
+        if loaded:
+            logger.info("Loaded %d persisted dynamic tools", loaded)
 
         self._booted = True
         await self.event_bus.emit(

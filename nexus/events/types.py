@@ -24,6 +24,9 @@ class EventType(str, Enum):
     AGENT_FAILED = "agent.failed"
     AGENT_TERMINATED = "agent.terminated"
 
+    # Agent messaging (IPC)
+    AGENT_MESSAGE = "agent.message"
+
     # Tasks
     TASK_CREATED = "task.created"
     TASK_ASSIGNED = "task.assigned"

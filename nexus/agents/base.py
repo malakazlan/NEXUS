@@ -177,3 +177,86 @@ class BaseAgent(ABC):
             "tokens_used": usage.total_tokens if usage else 0,
             "token_budget": self.token_budget,
         }
+
+    # ── Messaging ────────────────────────────────────────────────────
+
+    async def send_message(
+        self,
+        to_agent: str,
+        content: str,
+        *,
+        message_type: str = "request",
+        correlation_id: str | None = None,
+    ) -> None:
+        """Send a message to another agent via the kernel's message router."""
+        if self._kernel.message_router is None:
+            logger.warning("Message router not available, message dropped")
+            return
+        await self._kernel.message_router.send(
+            from_agent=self.id,
+            to_agent=to_agent,
+            content=content,
+            message_type=message_type,
+            correlation_id=correlation_id,
+        )
+
+    # ── Self-evolution ───────────────────────────────────────────────
+
+    async def propose_tool(
+        self,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        reason: str = "",
+    ) -> bool:
+        """Propose a new tool when the agent hits a limitation.
+
+        The orchestrator or coder agent will then generate the implementation.
+        Returns True if the tool was successfully created.
+        """
+        if self._kernel.tool_registry.has(name):
+            logger.info("Tool %s already exists, skipping proposal", name)
+            return True
+
+        if self._kernel.tool_creator is None:
+            logger.warning("Tool creator not available, cannot propose tool %s", name)
+            return False
+
+        logger.info(
+            "Agent %s proposing tool: %s (reason: %s)",
+            self.id, name, reason or "not specified",
+        )
+
+        # Ask the coder agent to generate the implementation
+        from nexus.agents.coder import CoderAgent
+
+        coder_agents = self._kernel.agent_registry.find_by_type("coder")
+        if coder_agents:
+            coder = coder_agents[0]
+        else:
+            coder = CoderAgent(kernel=self._kernel)
+            await self._kernel.spawn_agent(coder)
+
+        generation_result = await coder.generate_tool(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+        )
+
+        if generation_result is None:
+            logger.error("Coder failed to generate tool %s", name)
+            return False
+
+        tool_code, test_code = generation_result
+
+        from nexus.mcp_layer.creator import ToolSpec
+
+        spec = ToolSpec(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            proposed_by=self.id,
+        )
+
+        result = await self._kernel.tool_creator.create_tool(spec, tool_code, test_code)
+        return result.success
