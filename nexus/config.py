@@ -27,6 +27,9 @@ class NexusConfig(BaseSettings):
     # Workspace -----------------------------------------------------
     workspace_dir: Path = Path("./workspace")
 
+    # Persisted dynamic tools
+    tools_dir: Path = Path.home() / ".nexus" / "tools"
+
     # Approval flags ------------------------------------------------
     require_approval_for_tools: bool = True
     require_approval_for_shell: bool = True
