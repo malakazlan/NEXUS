@@ -24,7 +24,7 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
   const wsUrl =
     url ??
     (typeof window !== "undefined"
-      ? `ws://${window.location.hostname}:8000/api/ws/events`
+      ? `ws://${window.location.hostname}:8080/api/ws/events`
       : "");
 
   const connect = useCallback(() => {
